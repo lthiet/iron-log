@@ -132,6 +132,12 @@ async function saveSession() {
   clearSession();
   state.saveIndicator = true;
   render();
+  const fi = document.querySelector('.set-input');
+  console.log('immediately after render:', fi?.value);
+  setTimeout(() => {
+    const fi2 = document.querySelector('.set-input');
+    console.log('after tick:', fi2?.value);
+  }, 0);
   setTimeout(() => { state.saveIndicator = false; render(); }, 2000);
 }
 

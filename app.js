@@ -117,6 +117,7 @@ async function logRun(distance, duration) {
 }
 
 async function saveSession() {
+  console.log("v4 saveSession called");
   const date = todayStr();
   const prog = state.programs[state.activeProgram];
   prog.exercises.forEach(ex => {

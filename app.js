@@ -1,3 +1,4 @@
+console.log("app.js v5 loaded");
 // ─── Storage ───
 const DB_NAME = "ironlog", STORE_NAME = "data";
 
@@ -454,3 +455,9 @@ function render() {
 }
 
 loadAll();
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.btn-save')) {
+    console.log('Save button click detected via delegation');
+  }
+});

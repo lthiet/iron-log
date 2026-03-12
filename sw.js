@@ -1,4 +1,4 @@
-const CACHE = 'iron-log-v4';
+const CACHE = 'iron-log-v5';
 const ASSETS = ['/iron-log/', '/iron-log/index.html', '/iron-log/iron-log.html', '/iron-log/manifest.json', '/iron-log/icon.svg', '/iron-log/app.css', '/iron-log/app.js'];
 
 self.addEventListener('install', e => {
@@ -14,5 +14,6 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  // Network-first: always try to get fresh code, fall back to cache offline
+  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
 });

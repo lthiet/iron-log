@@ -247,11 +247,11 @@ function renderSetRow(exId, set, index) {
   return h("div", { className: "set-row" },
     h("span", { className: "set-num" }, String(index + 1)),
     h("div", { className: "set-input-wrap" },
-      h("input", { type: "number", inputMode: "decimal", className: "set-input has-unit", value: set.weight, placeholder: "kg", onInput: (e) => { state.sessionSets[exId][index].weight = e.target.value; } }),
+      h("input", { type: "number", inputMode: "decimal", className: "set-input has-unit", autocomplete: "off", value: set.weight, placeholder: "kg", onInput: (e) => { state.sessionSets[exId][index].weight = e.target.value; } }),
       h("span", { className: "set-unit" }, "kg")
     ),
     h("div", {},
-      h("input", { type: "number", inputMode: "numeric", className: "set-input", value: set.reps, placeholder: "reps", onInput: (e) => { state.sessionSets[exId][index].reps = e.target.value; } })
+      h("input", { type: "number", inputMode: "numeric", className: "set-input", autocomplete: "off", value: set.reps, placeholder: "reps", onInput: (e) => { state.sessionSets[exId][index].reps = e.target.value; } })
     ),
     h("button", { className: "btn-remove-set", onClick: () => { state.sessionSets[exId].splice(index, 1); render(); } }, "×")
   );

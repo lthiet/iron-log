@@ -154,7 +154,7 @@ function startTimer(){state.timer.remaining=state.timer.duration;state.timer.run
 function stopTimer(){state.timer.running=false;state.timer.remaining=null;clearInterval(state.timer.interval);render()}
 
 const $=s=>document.querySelector(s);const app=()=>$("#app");
-function h(tag,attrs,...ch){const el=document.createElement(tag);if(attrs)Object.entries(attrs).forEach(([k,v])=>{if(k==="style"&&typeof v==="object")Object.assign(el.style,v);else if(k.startsWith("on"))el.addEventListener(k.slice(2).toLowerCase(),v);else if(k==="className")el.className=v;else el.setAttribute(k,v)});ch.flat().forEach(c=>{if(c==null)return;el.appendChild(typeof c==="string"?document.createTextNode(c):c)});return el}
+function h(tag,attrs,...ch){const el=document.createElement(tag);if(attrs)Object.entries(attrs).forEach(([k,v])=>{if(k==="style"&&typeof v==="object")Object.assign(el.style,v);else if(k.startsWith("on"))el.addEventListener(k.slice(2).toLowerCase(),v);else if(k==="className")el.className=v;else if(k==="value")el.value=v;else el.setAttribute(k,v)});ch.flat().forEach(c=>{if(c==null)return;el.appendChild(typeof c==="string"?document.createTextNode(c):c)});return el}
 
 function drawLineChart(canvas,values,labels,color,height){
   const ctx=canvas.getContext("2d");const dpr=window.devicePixelRatio||1;

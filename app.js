@@ -130,6 +130,7 @@ async function saveSession() {
   clearSession();
   state.saveIndicator = true;
   render();
+  document.querySelectorAll(".set-input").forEach(el => { el.value = ""; });
   await dbSet("history", state.history);
   setTimeout(() => { state.saveIndicator = false; render(); }, 2000);
 }

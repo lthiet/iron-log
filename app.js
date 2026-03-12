@@ -128,9 +128,12 @@ async function saveSession() {
     if (idx >= 0) state.history[ex.id][idx] = entry; else state.history[ex.id].push(entry);
   });
   clearSession();
+  console.log("After clearSession, sessionSets:", JSON.stringify(state.sessionSets));
   state.saveIndicator = true;
   render();
-  document.querySelectorAll(".set-input").forEach(el => { el.value = ""; });
+  const inputs = document.querySelectorAll(".set-input");
+  console.log("After render, input count:", inputs.length, "values:", [...inputs].map(el => el.value));
+  inputs.forEach(el => { el.value = ""; });
   await dbSet("history", state.history);
   setTimeout(() => { state.saveIndicator = false; render(); }, 2000);
 }

@@ -1,5 +1,5 @@
-const CACHE = 'iron-log-v2';
-const ASSETS = ['/', '/index.html', '/manifest.json', '/icon.svg'];
+const CACHE = 'iron-log-v3';
+const ASSETS = ['/', '/index.html', '/iron-log.html', '/manifest.json', '/icon.svg', '/app.css', '/app.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

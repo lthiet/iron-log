@@ -1,4 +1,4 @@
-console.log("app.js v6 loaded");
+console.log("app.js v7 loaded");
 // ─── Storage ───
 const DB_NAME = "ironlog", STORE_NAME = "data";
 
@@ -34,6 +34,123 @@ async function dbSet(k, v) {
   } catch (e) { console.error("Save failed:", e); }
 }
 
+// ─── Cloud Sync ───
+const auth = firebase.auth();
+const db = firebase.database();
+const googleProvider = new firebase.auth.GoogleAuthProvider();
+let cloudListeners = [];
+
+function cloudRef(key) {
+  if (!state.user) return null;
+  return db.ref("users/" + state.user.uid + "/" + key);
+}
+
+async function cloudSet(key, value) {
+  const ref = cloudRef(key);
+  if (ref) await ref.set(JSON.parse(JSON.stringify(value)));
+}
+
+function mergeArraysByDate(local, cloud) {
+  const map = {};
+  local.forEach(e => { map[e.date] = e; });
+  cloud.forEach(e => { map[e.date] = e; }); // cloud wins
+  return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function mergeHistory(local, cloud) {
+  const merged = { ...local };
+  for (const exId of Object.keys(cloud || {})) {
+    if (!merged[exId]) { merged[exId] = cloud[exId]; continue; }
+    const map = {};
+    merged[exId].forEach(e => { map[e.date] = e; });
+    cloud[exId].forEach(e => { map[e.date] = e; }); // cloud wins
+    merged[exId] = Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
+  }
+  return merged;
+}
+
+async function syncFromCloud() {
+  if (!state.user) return;
+  const snap = await db.ref("users/" + state.user.uid).once("value");
+  const cloud = snap.val() || {};
+
+  if (cloud.programs) {
+    state.programs = cloud.programs;
+  } else {
+    await cloudSet("programs", state.programs);
+  }
+
+  state.bodyWeight = mergeArraysByDate(state.bodyWeight, cloud.bodyweight || []);
+  state.runs = mergeArraysByDate(state.runs, cloud.runs || []);
+  state.history = mergeHistory(state.history, cloud.history || {});
+
+  // Push merged data back
+  await Promise.all([
+    dbSet("programs", state.programs),
+    dbSet("bodyweight", state.bodyWeight),
+    dbSet("runs", state.runs),
+    dbSet("history", state.history),
+    cloudSet("bodyweight", state.bodyWeight),
+    cloudSet("runs", state.runs),
+    cloudSet("history", state.history),
+  ]);
+
+  initSession();
+  render();
+}
+
+function attachCloudListeners() {
+  detachCloudListeners();
+  if (!state.user) return;
+  const uid = state.user.uid;
+  const keys = [
+    { fbKey: "bodyweight", stateKey: "bodyWeight", merge: (_, c) => c || [] },
+    { fbKey: "runs", stateKey: "runs", merge: (_, c) => c || [] },
+    { fbKey: "history", stateKey: "history", merge: (_, c) => c || {} },
+    { fbKey: "programs", stateKey: "programs", merge: (_, c) => c || state.programs },
+  ];
+  keys.forEach(({ fbKey, stateKey, merge }) => {
+    const ref = db.ref("users/" + uid + "/" + fbKey);
+    const cb = ref.on("value", snap => {
+      const cloud = snap.val();
+      if (cloud == null) return;
+      state[stateKey] = merge(state[stateKey], cloud);
+      dbSet(fbKey === "bodyweight" ? "bodyweight" : fbKey, state[stateKey]);
+      if (fbKey === "programs") initSession();
+      render();
+    });
+    cloudListeners.push({ ref, event: "value", cb });
+  });
+}
+
+function detachCloudListeners() {
+  cloudListeners.forEach(({ ref, event, cb }) => ref.off(event, cb));
+  cloudListeners = [];
+}
+
+async function signIn() {
+  try {
+    await auth.signInWithPopup(googleProvider);
+  } catch (e) {
+    console.error("Sign-in failed:", e);
+  }
+}
+
+function signOut() {
+  auth.signOut();
+}
+
+auth.onAuthStateChanged(async (user) => {
+  state.user = user || null;
+  if (user) {
+    await syncFromCloud();
+    attachCloudListeners();
+  } else {
+    detachCloudListeners();
+  }
+  render();
+});
+
 // ─── Defaults ───
 const DEFAULT_PROGRAMS = [
   { id: "push", name: "Push", exercises: [{ id: "bench", name: "Bench Press" }, { id: "ohp", name: "Overhead Press" }, { id: "incline-db", name: "Incline DB Press" }, { id: "lateral-raise", name: "Lateral Raises" }, { id: "tricep-push", name: "Tricep Pushdowns" }] },
@@ -46,7 +163,7 @@ let state = {
   view: "weight", liftSub: "log",
   programs: DEFAULT_PROGRAMS, activeProgram: 0,
   sessionSets: {}, history: {}, bodyWeight: [], runs: [],
-  loaded: false, saveIndicator: false
+  loaded: false, saveIndicator: false, user: null
 };
 
 // ─── Helpers ───
@@ -92,6 +209,7 @@ async function logBodyWeight(w) {
   if (idx >= 0) state.bodyWeight[idx] = entry; else state.bodyWeight.push(entry);
   state.bodyWeight.sort((a, b) => a.date.localeCompare(b.date));
   await dbSet("bodyweight", state.bodyWeight);
+  cloudSet("bodyweight", state.bodyWeight);
   render();
 }
 
@@ -102,6 +220,7 @@ async function logRun(distance, duration) {
   if (idx >= 0) state.runs[idx] = entry; else state.runs.push(entry);
   state.runs.sort((a, b) => a.date.localeCompare(b.date));
   await dbSet("runs", state.runs);
+  cloudSet("runs", state.runs);
   render();
 }
 
@@ -118,6 +237,7 @@ async function saveSession() {
     if (idx >= 0) state.history[ex.id][idx] = entry; else state.history[ex.id].push(entry);
   });
   await dbSet("history", state.history);
+  cloudSet("history", state.history);
   clearSession();
   state.saveIndicator = true;
   render();
@@ -131,6 +251,7 @@ async function savePrograms(ed) {
   state.activeProgram = 0;
   state.view = "lifting";
   await dbSet("programs", ed);
+  cloudSet("programs", ed);
   initSession();
   render();
 }
@@ -253,7 +374,7 @@ function renderWeightTab() {
     ),
     sorted.length > 0 ? h("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;" },
       ...sorted.slice(-10).reverse().map(e => h("div", { className: "tag" }, `${fmtDate(e.date)}: ${e.weight}`,
-        h("button", { className: "tag-remove", onClick: () => { state.bodyWeight = state.bodyWeight.filter(x => x.date !== e.date); dbSet("bodyweight", state.bodyWeight); render(); } }, "×")
+        h("button", { className: "tag-remove", onClick: () => { state.bodyWeight = state.bodyWeight.filter(x => x.date !== e.date); dbSet("bodyweight", state.bodyWeight); cloudSet("bodyweight", state.bodyWeight); render(); } }, "×")
       ))
     ) : null
   ));
@@ -320,7 +441,7 @@ function renderRunningTab() {
     ),
     sorted.length > 0 ? h("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;" },
       ...sorted.slice(-10).reverse().map(e => h("div", { className: "tag" }, `${fmtDate(e.date)}: ${e.distance}km ${e.duration}min`,
-        h("button", { className: "tag-remove", onClick: () => { state.runs = state.runs.filter(x => x.date !== e.date); dbSet("runs", state.runs); render(); } }, "×")
+        h("button", { className: "tag-remove", onClick: () => { state.runs = state.runs.filter(x => x.date !== e.date); dbSet("runs", state.runs); cloudSet("runs", state.runs); render(); } }, "×")
       ))
     ) : null
   ));
@@ -375,12 +496,25 @@ function render() {
   const root = app();
   root.innerHTML = "";
   const dateStr = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
-  root.append(h("div", { className: "header" },
-    mkLogo(dateStr),
+  const headerBtns = h("div", { style: "display:flex;gap:8px;align-items:center;" });
+  if (state.user) {
+    headerBtns.append(
+      h("div", { className: "user-badge", title: state.user.email },
+        state.user.photoURL
+          ? h("img", { src: state.user.photoURL, className: "user-avatar", referrerpolicy: "no-referrer" })
+          : h("span", { className: "user-initial" }, (state.user.displayName || state.user.email || "?")[0])
+      ),
+      h("button", { className: "btn-edit", onClick: signOut }, "Sign out")
+    );
+  } else {
+    headerBtns.append(h("button", { className: "btn-edit", onClick: signIn }, "Sign in"));
+  }
+  headerBtns.append(
     state.view !== "edit"
-      ? h("button", { className: "btn-edit", onClick: () => { state.view = "edit"; render(); } }, "⚙ Edit")
-      : h("button", { className: "btn-edit", onClick: () => { state.view = "lifting"; render(); } }, "← Back")
-  ));
+      ? h("button", { className: "btn-edit", onClick: () => { state.view = "edit"; render(); } }, "⚙")
+      : h("button", { className: "btn-edit", onClick: () => { state.view = "lifting"; render(); } }, "←")
+  );
+  root.append(h("div", { className: "header" }, mkLogo(dateStr), headerBtns));
   if (state.view === "edit") { root.append(renderEditor()); return; }
   root.append(h("div", { className: "tabs", style: "margin-bottom:16px;" },
     ...["weight", "lifting", "running"].map(v => h("button", { className: "tab" + (state.view === v ? " active" : ""), onClick: () => { state.view = v; render(); } }, v.charAt(0).toUpperCase() + v.slice(1)))

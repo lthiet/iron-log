@@ -1,4 +1,4 @@
-console.log("app.js v5 loaded");
+console.log("app.js v6 loaded");
 // ─── Storage ───
 const DB_NAME = "ironlog", STORE_NAME = "data";
 
@@ -46,24 +46,13 @@ let state = {
   view: "weight", liftSub: "log",
   programs: DEFAULT_PROGRAMS, activeProgram: 0,
   sessionSets: {}, history: {}, bodyWeight: [], runs: [],
-  loaded: false, saveIndicator: false,
-  timer: { duration: 60, remaining: null, running: false, interval: null }
+  loaded: false, saveIndicator: false
 };
-let audioCtx = null;
 
 // ─── Helpers ───
-function playBeep() {
-  try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.connect(g); g.connect(audioCtx.destination);
-    o.frequency.value = 880; g.gain.value = 0.3;
-    o.start(); o.stop(audioCtx.currentTime + 0.15);
-  } catch {}
-}
 function todayStr() { return new Date().toISOString().split("T")[0]; }
 function fmtDate(d) { return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" }); }
-function fmtTime(s) { const m = Math.floor(s / 60); return `${m}:${(s % 60).toString().padStart(2, "0")}`; }
+
 
 // ─── Session ───
 function initSession() {
@@ -118,7 +107,7 @@ async function logRun(distance, duration) {
 }
 
 async function saveSession() {
-  console.log("v4 saveSession called");
+
   const date = todayStr();
   const prog = state.programs[state.activeProgram];
   prog.exercises.forEach(ex => {
@@ -133,12 +122,8 @@ async function saveSession() {
   clearSession();
   state.saveIndicator = true;
   render();
-  const fi = document.querySelector('.set-input');
-  console.log('immediately after render:', fi?.value);
-  setTimeout(() => {
-    const fi2 = document.querySelector('.set-input');
-    console.log('after tick:', fi2?.value);
-  }, 0);
+  // Force-clear all inputs after DOM rebuild to defeat Chrome autofill
+  document.querySelectorAll('.set-input').forEach(el => { el.value = ""; });
   setTimeout(() => { state.saveIndicator = false; render(); }, 2000);
 }
 
@@ -151,31 +136,6 @@ async function savePrograms(ed) {
   render();
 }
 
-// ─── Timer ───
-function startTimer() {
-  state.timer.remaining = state.timer.duration;
-  state.timer.running = true;
-  clearInterval(state.timer.interval);
-  state.timer.interval = setInterval(() => {
-    state.timer.remaining--;
-    if (state.timer.remaining <= 0) {
-      state.timer.remaining = 0;
-      state.timer.running = false;
-      clearInterval(state.timer.interval);
-      playBeep();
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-    }
-    render();
-  }, 1000);
-  render();
-}
-
-function stopTimer() {
-  state.timer.running = false;
-  state.timer.remaining = null;
-  clearInterval(state.timer.interval);
-  render();
-}
 
 // ─── DOM Helper ───
 const $ = s => document.querySelector(s);
@@ -228,28 +188,6 @@ function drawLineChart(canvas, values, labels, color, height) {
 }
 
 // ─── Components ───
-function renderTimer() {
-  const t = state.timer, rem = t.remaining, dur = t.duration, pct = rem !== null ? rem / dur : 1;
-  const color = rem === 0 ? "var(--success)" : (rem !== null && rem < 10) ? "var(--warning)" : "var(--accent)";
-  const circ = 2 * Math.PI * 22;
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "52"); svg.setAttribute("height", "52"); svg.style.transform = "rotate(-90deg)";
-  const bg = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  bg.setAttribute("cx", "26"); bg.setAttribute("cy", "26"); bg.setAttribute("r", "22"); bg.setAttribute("fill", "none"); bg.setAttribute("stroke", "var(--border)"); bg.setAttribute("stroke-width", "4");
-  const fg = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  fg.setAttribute("cx", "26"); fg.setAttribute("cy", "26"); fg.setAttribute("r", "22"); fg.setAttribute("fill", "none"); fg.setAttribute("stroke", color); fg.setAttribute("stroke-width", "4");
-  fg.setAttribute("stroke-dasharray", circ); fg.setAttribute("stroke-dashoffset", circ * (1 - pct)); fg.setAttribute("stroke-linecap", "round"); fg.style.transition = "stroke-dashoffset 0.3s,stroke 0.3s";
-  svg.append(bg, fg);
-  return h("div", { className: "timer-card" },
-    h("div", { className: "timer-ring" }, svg, h("span", { className: "timer-display", style: { color } }, rem !== null ? fmtTime(rem) : fmtTime(dur))),
-    h("div", { style: { flex: "1", display: "flex", flexDirection: "column", gap: "6px" } },
-      h("span", { className: "timer-label" }, "Rest Timer"),
-      h("div", { className: "timer-presets" }, ...[60, 180].map(s => h("button", { className: "preset-btn" + (dur === s ? " active" : ""), onClick: () => { state.timer.duration = s; if (!t.running) state.timer.remaining = null; render(); } }, `${s / 60}m`)))
-    ),
-    h("button", { className: "btn-timer" + (t.running ? " running" : ""), onClick: () => t.running ? stopTimer() : startTimer() }, rem === 0 ? "Reset" : t.running ? "Stop" : "Start")
-  );
-}
-
 function renderSetRow(exId, set, index) {
   return h("div", { className: "set-row" },
     h("span", { className: "set-num" }, String(index + 1)),
@@ -281,7 +219,7 @@ function renderExerciseCard(ex) {
 
 function renderProgressChart(ex) {
   const hist = state.history[ex.id] || [];
-  if (hist.length < 2) return null;
+  if (hist.length < 1) return null;
   const data = hist.slice(-20).map(h => ({ date: fmtDate(h.date), weight: Math.max(...h.sets.map(s => parseFloat(s.weight) || 0)) }));
   const card = h("div", { className: "progress-card" },
     h("div", { className: "progress-title" }, ex.name, h("span", { className: "progress-subtitle" }, "Max Weight (kg)")),
@@ -296,7 +234,7 @@ function renderWeightTab() {
   const sorted = [...state.bodyWeight].sort((a, b) => a.date.localeCompare(b.date));
   const recent = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   const frag = document.createDocumentFragment();
-  if (sorted.length >= 2) {
+  if (sorted.length >= 1) {
     const data = sorted.slice(-30);
     const card = h("div", { className: "progress-card", style: "margin-bottom:12px;" },
       h("div", { className: "progress-title" }, "Body Weight", h("span", { className: "progress-subtitle" }, "kg")),
@@ -335,7 +273,6 @@ function renderLiftingTab() {
     ...["log", "progress"].map(v => h("button", { className: "tab" + (state.liftSub === v ? " active" : ""), onClick: () => { state.liftSub = v; render(); } }, v.charAt(0).toUpperCase() + v.slice(1)))
   ));
   if (state.liftSub === "log") {
-    frag.append(renderTimer());
     prog.exercises.forEach(ex => frag.append(renderExerciseCard(ex)));
     frag.append(h("button", { className: "btn-save" + (state.saveIndicator ? " saved" : ""), onClick: saveSession }, state.saveIndicator ? "✓ Saved!" : "Save Session"));
   }
@@ -352,7 +289,7 @@ function renderRunningTab() {
   const sorted = [...state.runs].sort((a, b) => a.date.localeCompare(b.date));
   const recent = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   const frag = document.createDocumentFragment();
-  if (sorted.length >= 2) {
+  if (sorted.length >= 1) {
     const data = sorted.slice(-30);
     frag.append(h("div", { className: "progress-card", style: "margin-bottom:8px;" },
       h("div", { className: "progress-title" }, "Distance", h("span", { className: "progress-subtitle" }, "km")),

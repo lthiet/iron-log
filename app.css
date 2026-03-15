@@ -57,15 +57,6 @@ button:active { transform: scale(0.97); }
 .btn-add-set { background: transparent; border: 1px dashed var(--border); border-radius: 10px; padding: 8px 0; font-size: 13px; color: var(--text-muted); cursor: pointer; width: 100%; font-weight: 500; }
 .btn-add-set:hover { border-color: var(--accent); color: var(--accent); }
 
-.timer-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 20px; display: flex; align-items: center; gap: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-.timer-ring { position: relative; width: 52px; height: 52px; flex-shrink: 0; }
-.timer-display { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; }
-.timer-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-muted); }
-.timer-presets { display: flex; gap: 6px; margin-top: 6px; }
-.preset-btn { background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--text-muted); cursor: pointer; font-weight: 500; }
-.preset-btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
-.btn-timer { border: 1px solid var(--accent); background: var(--accent-glow); border-radius: 12px; padding: 10px 20px; font-size: 13px; font-weight: 600; color: var(--accent); cursor: pointer; min-width: 72px; }
-.btn-timer.running { border-color: var(--danger); background: var(--danger-glow); color: var(--danger); }
 
 .btn-save { background: linear-gradient(135deg, var(--accent), #1d4ed8); border: none; border-radius: 14px; padding: 16px 0; font-size: 15px; font-weight: 700; color: #fff; cursor: pointer; margin-top: 4px; width: 100%; box-shadow: 0 4px 16px rgba(37,99,235,0.2); transition: all 0.3s; }
 .btn-save.saved { background: linear-gradient(135deg, var(--success), #15803d); box-shadow: 0 4px 16px rgba(22,163,74,0.2); }

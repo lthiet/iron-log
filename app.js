@@ -178,9 +178,7 @@ function initSession() {
   if (!p) return;
   p.exercises.forEach(ex => {
     if (state.sessionSets[ex.id]) return;
-    const h = state.history[ex.id] || [];
-    const l = h.length > 0 ? h[h.length - 1] : null;
-    state.sessionSets[ex.id] = l ? l.sets.map(s => ({ ...s })) : [{ weight: "", reps: "" }, { weight: "", reps: "" }, { weight: "", reps: "" }];
+    state.sessionSets[ex.id] = [{ weight: "", reps: "" }, { weight: "", reps: "" }, { weight: "", reps: "" }];
   });
 }
 

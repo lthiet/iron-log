@@ -1,4 +1,4 @@
-const CACHE = 'iron-log-v6';
+const CACHE = 'iron-log-v7';
 const ASSETS = ['/iron-log/', '/iron-log/index.html', '/iron-log/iron-log.html', '/iron-log/manifest.json', '/iron-log/icon.svg', '/iron-log/app.css', '/iron-log/app.js'];
 
 self.addEventListener('install', e => {

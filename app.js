@@ -163,7 +163,8 @@ let state = {
   view: "weight", liftSub: "log",
   programs: DEFAULT_PROGRAMS, activeProgram: 0,
   sessionSets: {}, history: {}, bodyWeight: [], runs: [],
-  loaded: false, saveIndicator: false, user: null
+  loaded: false, saveIndicator: false, user: null,
+  rawDataOpen: false, rawDataEdit: null, rawDataTab: "weight", rawDataHistoryEx: null
 };
 
 // ─── Helpers ───
@@ -244,6 +245,161 @@ async function saveSession() {
   // Force-clear all inputs after DOM rebuild to defeat Chrome autofill
   document.querySelectorAll('.set-input').forEach(el => { el.value = ""; });
   setTimeout(() => { state.saveIndicator = false; render(); }, 2000);
+}
+
+// ─── Raw Data Editor ───
+function setsToText(sets) {
+  return (sets || []).map(s => `${s.weight}×${s.reps}`).join(" / ");
+}
+function textToSets(text) {
+  return text.split("/").map(p => {
+    const m = p.trim().match(/^([0-9.]+)[×xX*]([0-9]+)$/);
+    return m ? { weight: m[1], reps: m[2] } : null;
+  }).filter(Boolean);
+}
+
+function openRawData() {
+  const histText = {};
+  Object.keys(state.history).forEach(exId => {
+    histText[exId] = (state.history[exId] || []).map(s => ({ date: s.date, setsText: setsToText(s.sets) }));
+  });
+  state.rawDataEdit = {
+    bodyWeight: JSON.parse(JSON.stringify(state.bodyWeight)),
+    runs: JSON.parse(JSON.stringify(state.runs)),
+    histText,
+  };
+  state.rawDataTab = "weight";
+  state.rawDataHistoryEx = Object.keys(histText)[0] || null;
+  state.rawDataOpen = true;
+  render();
+}
+
+function closeRawData() {
+  state.rawDataOpen = false;
+  state.rawDataEdit = null;
+  state.rawDataHistoryEx = null;
+  render();
+}
+
+async function saveRawData() {
+  const ed = state.rawDataEdit;
+  const history = {};
+  Object.keys(ed.histText).forEach(exId => {
+    history[exId] = ed.histText[exId].map(s => ({ date: s.date, sets: textToSets(s.setsText) }));
+  });
+  state.bodyWeight = ed.bodyWeight;
+  state.runs = ed.runs;
+  state.history = history;
+  await Promise.all([
+    dbSet("bodyweight", state.bodyWeight),
+    dbSet("runs", state.runs),
+    dbSet("history", state.history),
+  ]);
+  if (state.user) {
+    cloudSet("bodyweight", state.bodyWeight);
+    cloudSet("runs", state.runs);
+    cloudSet("history", state.history);
+  }
+  state.rawDataOpen = false;
+  state.rawDataEdit = null;
+  state.rawDataHistoryEx = null;
+  render();
+}
+
+function renderRawDataModal() {
+  const ed = state.rawDataEdit;
+  if (!ed) return null;
+  const exMap = {};
+  state.programs.forEach(p => p.exercises.forEach(ex => { exMap[ex.id] = ex.name; }));
+
+  function bwTable() {
+    const rows = ed.bodyWeight;
+    return h("div", { className: "tbl-wrap" },
+      h("table", { className: "data-table" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Weight (kg)"), h("th", {}))),
+        h("tbody", {},
+          ...rows.map((row, i) => h("tr", {},
+            h("td", {}, h("input", { type: "date", className: "td-input", value: row.date, onInput: e => { rows[i].date = e.target.value; } })),
+            h("td", {}, h("input", { type: "number", inputMode: "decimal", className: "td-input", value: String(row.weight), onInput: e => { rows[i].weight = parseFloat(e.target.value) || 0; } })),
+            h("td", {}, h("button", { className: "btn-remove tbl-del", onClick: () => { rows.splice(i, 1); render(); } }, "×"))
+          ))
+        )
+      ),
+      h("button", { className: "btn-dashed", style: "margin-top:8px;", onClick: () => { rows.push({ date: todayStr(), weight: 0 }); render(); } }, "+ Add row")
+    );
+  }
+
+  function runsTable() {
+    const rows = ed.runs;
+    return h("div", { className: "tbl-wrap" },
+      h("table", { className: "data-table" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Distance (km)"), h("th", {}, "Duration (min)"), h("th", {}))),
+        h("tbody", {},
+          ...rows.map((row, i) => h("tr", {},
+            h("td", {}, h("input", { type: "date", className: "td-input", value: row.date, onInput: e => { rows[i].date = e.target.value; } })),
+            h("td", {}, h("input", { type: "number", inputMode: "decimal", className: "td-input", value: String(row.distance), onInput: e => { rows[i].distance = parseFloat(e.target.value) || 0; } })),
+            h("td", {}, h("input", { type: "number", inputMode: "numeric", className: "td-input", value: String(row.duration), onInput: e => { rows[i].duration = parseInt(e.target.value) || 0; } })),
+            h("td", {}, h("button", { className: "btn-remove tbl-del", onClick: () => { rows.splice(i, 1); render(); } }, "×"))
+          ))
+        )
+      ),
+      h("button", { className: "btn-dashed", style: "margin-top:8px;", onClick: () => { rows.push({ date: todayStr(), distance: 0, duration: 0 }); render(); } }, "+ Add row")
+    );
+  }
+
+  function histTable() {
+    const exIds = Object.keys(ed.histText);
+    if (!exIds.length) return h("div", { className: "empty-state" }, "No history yet.");
+    const selId = state.rawDataHistoryEx || exIds[0];
+    const sessions = ed.histText[selId] || [];
+    const sel = h("select", { className: "raw-select" },
+      ...exIds.map(id => {
+        const opt = h("option", { value: id }, exMap[id] || id);
+        if (id === selId) opt.setAttribute("selected", "selected");
+        return opt;
+      })
+    );
+    sel.addEventListener("change", e => { state.rawDataHistoryEx = e.target.value; render(); });
+    return h("div", { className: "tbl-wrap" },
+      h("div", { style: "margin-bottom:10px;" }, sel),
+      h("table", { className: "data-table" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Sets  (e.g. 75×5 / 80×3)"), h("th", {}))),
+        h("tbody", {},
+          ...sessions.map((session, i) => h("tr", {},
+            h("td", {}, h("input", { type: "date", className: "td-input", value: session.date, onInput: e => { sessions[i].date = e.target.value; } })),
+            h("td", {}, h("input", { type: "text", className: "td-input mono", value: session.setsText, placeholder: "75×5 / 80×3", onInput: e => { sessions[i].setsText = e.target.value; } })),
+            h("td", {}, h("button", { className: "btn-remove tbl-del", onClick: () => { sessions.splice(i, 1); render(); } }, "×"))
+          ))
+        )
+      ),
+      h("button", { className: "btn-dashed", style: "margin-top:8px;", onClick: () => { sessions.push({ date: todayStr(), setsText: "" }); render(); } }, "+ Add row")
+    );
+  }
+
+  const tabs = [{ key: "weight", label: "Weight" }, { key: "exercise", label: "Exercise" }, { key: "running", label: "Running" }];
+  return h("div", { className: "modal-overlay", onClick: e => { if (e.target.className === "modal-overlay") closeRawData(); } },
+    h("div", { className: "modal" },
+      h("div", { className: "modal-header" },
+        h("span", { style: "font-size:16px;font-weight:700;" }, "Raw Data"),
+        h("button", { className: "btn-remove", style: "font-size:22px;", onClick: closeRawData }, "×")
+      ),
+      h("div", { className: "modal-tabs" },
+        ...tabs.map(t => h("button", {
+          className: "modal-tab" + (state.rawDataTab === t.key ? " active" : ""),
+          onClick: () => { state.rawDataTab = t.key; render(); }
+        }, t.label))
+      ),
+      h("div", { className: "modal-body" },
+        state.rawDataTab === "weight" ? bwTable() :
+        state.rawDataTab === "exercise" ? histTable() :
+        runsTable()
+      ),
+      h("div", { className: "modal-footer" },
+        h("button", { className: "btn-cancel", onClick: closeRawData }, "Cancel"),
+        h("button", { className: "btn-primary", onClick: saveRawData }, "Save")
+      )
+    )
+  );
 }
 
 async function savePrograms(ed) {
@@ -475,6 +631,7 @@ function renderEditor() {
     h("div", { className: "editor-header" },
       h("h2", {}, "Edit Programs"),
       h("div", { style: { display: "flex", gap: "8px" } },
+        h("button", { className: "btn-cancel", onClick: openRawData }, "{ } Raw Data"),
         h("button", { className: "btn-cancel", onClick: () => { state.view = "lifting"; render(); } }, "Cancel"),
         h("button", { className: "btn-primary", onClick: () => savePrograms(ed) }, "Save")
       )
@@ -515,13 +672,18 @@ function render() {
       : h("button", { className: "btn-edit", onClick: () => { state.view = "lifting"; render(); } }, "←")
   );
   root.append(h("div", { className: "header" }, mkLogo(dateStr), headerBtns));
-  if (state.view === "edit") { root.append(renderEditor()); return; }
+  if (state.view === "edit") {
+    root.append(renderEditor());
+    if (state.rawDataOpen) root.append(renderRawDataModal());
+    return;
+  }
   root.append(h("div", { className: "tabs", style: "margin-bottom:16px;" },
     ...["weight", "lifting", "running"].map(v => h("button", { className: "tab" + (state.view === v ? " active" : ""), onClick: () => { state.view = v; render(); } }, v.charAt(0).toUpperCase() + v.slice(1)))
   ));
   if (state.view === "weight") root.append(renderWeightTab());
   if (state.view === "lifting") root.append(renderLiftingTab());
   if (state.view === "running") root.append(renderRunningTab());
+  if (state.rawDataOpen) root.append(renderRawDataModal());
 }
 
 loadAll();

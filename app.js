@@ -168,6 +168,18 @@ let state = {
   chartRange: (() => { try { return localStorage.getItem("chartRange") || "all"; } catch { return "all"; } })()
 };
 
+// ─── Layout breakpoint ───
+// Desktop drops the tab nav for an all-at-once dashboard; phones keep the tabs.
+const DESKTOP_Q = window.matchMedia("(min-width: 1000px)");
+const WIDE_Q = window.matchMedia("(min-width: 1400px)"); // room for a fourth column
+state.desktop = DESKTOP_Q.matches;
+state.wide = WIDE_Q.matches;
+DESKTOP_Q.addEventListener("change", (e) => { state.desktop = e.matches; render(); });
+WIDE_Q.addEventListener("change", (e) => { state.wide = e.matches; render(); });
+// Charts are canvas-drawn at a measured width, so a resize needs a redraw.
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
+
 // ─── Helpers ───
 function todayStr() { return new Date().toISOString().split("T")[0]; }
 function fmtDate(d) { return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" }); }
@@ -584,13 +596,13 @@ function renderProgressChart(ex) {
 }
 
 // ─── Tab: Weight ───
-function renderWeightTab() {
+function renderWeightTab(showRange = true) {
   const sorted = [...state.bodyWeight].sort((a, b) => a.date.localeCompare(b.date));
   const recent = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   const frag = document.createDocumentFragment();
   if (sorted.length >= 1) {
     const data = inRange(sorted);
-    frag.append(renderRangeBar());
+    if (showRange) frag.append(renderRangeBar());
     const trend = emaTrend(data);
     frag.append(data.length >= 1
       ? h("div", { className: "progress-card", style: "margin-bottom:12px;" },
@@ -617,39 +629,53 @@ function renderWeightTab() {
 }
 
 // ─── Tab: Lifting ───
-function renderLiftingTab() {
+function renderProgramBar() {
+  return h("div", { className: "program-bar" },
+    ...state.programs.map((p, i) => h("button", { className: "prog-btn" + (i === state.activeProgram ? " active" : ""), onClick: () => { state.activeProgram = i; initSession(); render(); } }, p.name))
+  );
+}
+
+function renderLiftingLog() {
   const frag = document.createDocumentFragment();
   const prog = state.programs[state.activeProgram];
   if (!prog) return frag;
-  frag.append(h("div", { className: "program-bar" },
-    ...state.programs.map((p, i) => h("button", { className: "prog-btn" + (i === state.activeProgram ? " active" : ""), onClick: () => { state.activeProgram = i; initSession(); render(); } }, p.name))
-  ));
+  prog.exercises.forEach(ex => frag.append(renderExerciseCard(ex)));
+  frag.append(h("button", { className: "btn-save" + (state.saveIndicator ? " saved" : ""), onClick: saveSession }, state.saveIndicator ? "✓ Saved!" : "Save Session"));
+  return frag;
+}
+
+function renderLiftingProgress(showRange = true) {
+  const frag = document.createDocumentFragment();
+  const prog = state.programs[state.activeProgram];
+  if (!prog) return frag;
+  const anyHist = prog.exercises.some(ex => (state.history[ex.id] || []).length > 0);
+  if (showRange && anyHist) frag.append(renderRangeBar());
+  let has = false;
+  prog.exercises.forEach(ex => { const c = renderProgressChart(ex); if (c) { frag.append(c); has = true; } });
+  if (!has) frag.append(h("div", { className: "empty-state" },
+    anyHist ? "No sessions in this range." : "Log at least 2 sessions to see progression charts."));
+  return frag;
+}
+
+function renderLiftingTab() {
+  const frag = document.createDocumentFragment();
+  if (!state.programs[state.activeProgram]) return frag;
+  frag.append(renderProgramBar());
   frag.append(h("div", { className: "tabs", style: "margin-bottom:12px;" },
     ...["log", "progress"].map(v => h("button", { className: "tab" + (state.liftSub === v ? " active" : ""), onClick: () => { state.liftSub = v; render(); } }, v.charAt(0).toUpperCase() + v.slice(1)))
   ));
-  if (state.liftSub === "log") {
-    prog.exercises.forEach(ex => frag.append(renderExerciseCard(ex)));
-    frag.append(h("button", { className: "btn-save" + (state.saveIndicator ? " saved" : ""), onClick: saveSession }, state.saveIndicator ? "✓ Saved!" : "Save Session"));
-  }
-  if (state.liftSub === "progress") {
-    const anyHist = prog.exercises.some(ex => (state.history[ex.id] || []).length > 0);
-    if (anyHist) frag.append(renderRangeBar());
-    let has = false;
-    prog.exercises.forEach(ex => { const c = renderProgressChart(ex); if (c) { frag.append(c); has = true; } });
-    if (!has) frag.append(h("div", { className: "empty-state" },
-      anyHist ? "No sessions in this range." : "Log at least 2 sessions to see progression charts."));
-  }
+  frag.append(state.liftSub === "log" ? renderLiftingLog() : renderLiftingProgress());
   return frag;
 }
 
 // ─── Tab: Running ───
-function renderRunningTab() {
+function renderRunningTab(showRange = true) {
   const sorted = [...state.runs].sort((a, b) => a.date.localeCompare(b.date));
   const recent = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   const frag = document.createDocumentFragment();
   if (sorted.length >= 1) {
     const data = inRange(sorted);
-    frag.append(renderRangeBar());
+    if (showRange) frag.append(renderRangeBar());
     if (data.length >= 1) {
       frag.append(h("div", { className: "progress-card", style: "margin-bottom:8px;" },
         h("div", { className: "progress-title" }, "Distance", h("span", { className: "progress-subtitle" }, "km")),
@@ -754,9 +780,33 @@ function render() {
       ? h("button", { className: "btn-edit", onClick: () => { state.view = "edit"; render(); } }, "⚙")
       : h("button", { className: "btn-edit", onClick: () => { state.view = "lifting"; render(); } }, "←")
   );
-  root.append(h("div", { className: "header" }, mkLogo(dateStr), headerBtns));
+  const headerKids = [mkLogo(dateStr)];
+  // One shared range bar on desktop instead of one per section.
+  if (state.desktop && state.view !== "edit") headerKids.push(h("div", { className: "header-range" }, renderRangeBar()));
+  headerKids.push(headerBtns);
+  root.append(h("div", { className: "header" }, ...headerKids));
   if (state.view === "edit") {
     root.append(renderEditor());
+    if (state.rawDataOpen) root.append(renderRawDataModal());
+    return;
+  }
+  if (state.desktop) {
+    const sec = (title, ...content) => {
+      const s = h("div", { className: "dash-sec" }, h("div", { className: "dash-title" }, title));
+      content.forEach(x => s.append(x));
+      return s;
+    };
+    const col = (...secs) => h("div", { className: "dash-col" }, ...secs);
+    const lifting = sec("Lifting", renderProgramBar(), renderLiftingLog());
+    const progress = sec("Progress", renderLiftingProgress(false));
+    const weight = sec("Body Weight", renderWeightTab(false));
+    const running = sec("Running", renderRunningTab(false));
+    // Columns are grouped explicitly: letting the grid wrap would strand a short
+    // section on a second row below the very tall lifting column.
+    const cols = state.wide
+      ? [col(lifting), col(progress), col(weight), col(running)]
+      : [col(lifting), col(progress), col(weight, running)];
+    root.append(h("div", { className: "dash" }, ...cols));
     if (state.rawDataOpen) root.append(renderRawDataModal());
     return;
   }

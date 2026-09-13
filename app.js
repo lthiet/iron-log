@@ -462,7 +462,21 @@ function h(tag, attrs, ...ch) {
 // ─── Charts ───
 const AXIS_W = 40, PT_SPACING = 48;
 
-function renderChart(values, labels, color, height) {
+// Exponential moving average weighted by real elapsed days, so the trend keeps the same
+// meaning whether weigh-ins are daily or sporadic. A long gap gives alpha ~1, letting the
+// curve meet the new reading instead of dragging a stale value across the gap.
+function emaTrend(entries, tauDays = 7) {
+  if (entries.length < 3) return null;
+  const out = [entries[0].weight];
+  for (let i = 1; i < entries.length; i++) {
+    const dDays = (new Date(entries[i].date) - new Date(entries[i - 1].date)) / 86400000;
+    const alpha = 1 - Math.exp(-Math.max(0, dDays) / tauDays);
+    out.push(alpha * entries[i].weight + (1 - alpha) * out[i - 1]);
+  }
+  return out;
+}
+
+function renderChart(values, labels, color, height, trend) {
   const plot = h("canvas", { className: "chart-plot" });
   const axis = h("canvas", { className: "chart-axis" });
   const scroll = h("div", { className: "chart-scroll" }, plot);
@@ -470,7 +484,7 @@ function renderChart(values, labels, color, height) {
   // The container measures 0 until layout settles (or while the tab is hidden); retry until it has a width.
   const draw = (tries = 120) => requestAnimationFrame(() => {
     if (!scroll.isConnected) return;
-    if (scroll.getBoundingClientRect().width > 0) drawLineChart(plot, axis, values, labels, color, height, fit);
+    if (scroll.getBoundingClientRect().width > 0) drawLineChart(plot, axis, values, labels, color, height, fit, trend);
     else if (tries > 0) draw(tries - 1);
   });
   draw();
@@ -485,7 +499,7 @@ function sizeCanvas(canvas, w, h, dpr) {
   return ctx;
 }
 
-function drawLineChart(canvas, axisCanvas, values, labels, color, height, fit) {
+function drawLineChart(canvas, axisCanvas, values, labels, color, height, fit, trend) {
   const dpr = window.devicePixelRatio || 1;
   const scroll = canvas.parentElement;
   const visW = scroll.getBoundingClientRect().width;
@@ -496,7 +510,8 @@ function drawLineChart(canvas, axisCanvas, values, labels, color, height, fit) {
   const span = Math.max(...values) - Math.min(...values);
   const minV = Math.min(...values) - span * 0.15 - 0.5, maxV = Math.max(...values) + span * 0.15 + 0.5;
   const range = maxV - minV || 1;
-  const pts = values.map((v, i) => ({ x: pad.left + (i / (values.length - 1 || 1)) * cW, y: pad.top + cH - ((v - minV) / range) * cH }));
+  const yFor = v => pad.top + cH - ((v - minV) / range) * cH;
+  const pts = values.map((v, i) => ({ x: pad.left + (i / (values.length - 1 || 1)) * cW, y: yFor(v) }));
   ctx.strokeStyle = "#e0e0e6"; ctx.lineWidth = 0.5;
   for (let i = 0; i < 4; i++) { const y = pad.top + (i / 3) * cH; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
   ctx.fillStyle = "#71717a"; ctx.font = "10px -apple-system,sans-serif";
@@ -517,6 +532,10 @@ function drawLineChart(canvas, axisCanvas, values, labels, color, height, fit) {
   ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(pts[0].x, H - pad.bottom);
   pts.forEach(p => ctx.lineTo(p.x, p.y)); ctx.lineTo(pts[pts.length - 1].x, H - pad.bottom); ctx.fill();
   if (cW / Math.max(1, values.length - 1) >= 10) pts.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); });
+  if (trend) {
+    ctx.strokeStyle = "rgba(24,24,27,0.55)"; ctx.lineWidth = 1.75; ctx.lineJoin = "round"; ctx.beginPath();
+    trend.forEach((v, i) => i === 0 ? ctx.moveTo(pts[i].x, yFor(v)) : ctx.lineTo(pts[i].x, yFor(v))); ctx.stroke();
+  }
   // Pinned Y axis — same scale and vertical geometry as the plot above
   const ax = sizeCanvas(axisCanvas, AXIS_W, H, dpr);
   ax.fillStyle = "#71717a"; ax.font = "10px -apple-system,sans-serif"; ax.textAlign = "right";
@@ -572,10 +591,11 @@ function renderWeightTab() {
   if (sorted.length >= 1) {
     const data = inRange(sorted);
     frag.append(renderRangeBar());
+    const trend = emaTrend(data);
     frag.append(data.length >= 1
       ? h("div", { className: "progress-card", style: "margin-bottom:12px;" },
-          h("div", { className: "progress-title" }, "Body Weight", h("span", { className: "progress-subtitle" }, "kg")),
-          renderChart(data.map(d => d.weight), data.map(d => fmtDate(d.date)), "#16a34a", 160))
+          h("div", { className: "progress-title" }, "Body Weight", h("span", { className: "progress-subtitle" }, trend ? "kg · 7-day trend" : "kg")),
+          renderChart(data.map(d => d.weight), data.map(d => fmtDate(d.date)), "#16a34a", 160, trend))
       : h("div", { className: "empty-state" }, "No weigh-ins in this range."));
   } else {
     frag.append(h("div", { className: "empty-state" }, "Log at least 2 weigh-ins to see the chart."));

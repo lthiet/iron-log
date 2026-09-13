@@ -164,12 +164,40 @@ let state = {
   programs: DEFAULT_PROGRAMS, activeProgram: 0,
   sessionSets: {}, history: {}, bodyWeight: [], runs: [],
   loaded: false, saveIndicator: false, user: null,
-  rawDataOpen: false, rawDataEdit: null, rawDataTab: "weight", rawDataHistoryEx: null
+  rawDataOpen: false, rawDataEdit: null, rawDataTab: "weight", rawDataHistoryEx: null,
+  chartRange: (() => { try { return localStorage.getItem("chartRange") || "all"; } catch { return "all"; } })()
 };
 
 // ─── Helpers ───
 function todayStr() { return new Date().toISOString().split("T")[0]; }
 function fmtDate(d) { return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" }); }
+
+// ─── Chart Range ───
+const RANGES = [{ key: "1m", label: "1M", months: 1 }, { key: "3m", label: "3M", months: 3 },
+  { key: "6m", label: "6M", months: 6 }, { key: "1y", label: "1Y", months: 12 }, { key: "all", label: "All" }];
+
+function rangeCutoff(key) {
+  const r = RANGES.find(r => r.key === key);
+  if (!r || !r.months) return null;
+  const d = new Date(); d.setMonth(d.getMonth() - r.months);
+  return d.toISOString().split("T")[0];
+}
+
+// Entries are any { date: "YYYY-MM-DD", ... }; "all" keeps everything.
+function inRange(entries) {
+  const cutoff = rangeCutoff(state.chartRange);
+  return cutoff ? entries.filter(e => e.date >= cutoff) : entries;
+}
+
+function renderRangeBar() {
+  return h("div", { className: "range-bar" }, ...RANGES.map(r =>
+    h("button", { className: "range-btn" + (state.chartRange === r.key ? " active" : ""), onClick: () => {
+      state.chartRange = r.key;
+      try { localStorage.setItem("chartRange", r.key); } catch {}
+      render();
+    } }, r.label)
+  ));
+}
 
 
 // ─── Session ───
@@ -432,25 +460,55 @@ function h(tag, attrs, ...ch) {
 }
 
 // ─── Charts ───
-function drawLineChart(canvas, values, labels, color, height) {
+const AXIS_W = 40, PT_SPACING = 48;
+
+function renderChart(values, labels, color, height) {
+  const plot = h("canvas", { className: "chart-plot" });
+  const axis = h("canvas", { className: "chart-axis" });
+  const scroll = h("div", { className: "chart-scroll" }, plot);
+  const fit = state.chartRange === "all"; // "All" compresses the full history into view
+  // The container measures 0 until layout settles (or while the tab is hidden); retry until it has a width.
+  const draw = (tries = 120) => requestAnimationFrame(() => {
+    if (!scroll.isConnected) return;
+    if (scroll.getBoundingClientRect().width > 0) drawLineChart(plot, axis, values, labels, color, height, fit);
+    else if (tries > 0) draw(tries - 1);
+  });
+  draw();
+  return h("div", { className: "chart-wrap" }, axis, scroll);
+}
+
+function sizeCanvas(canvas, w, h, dpr) {
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
   const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function drawLineChart(canvas, axisCanvas, values, labels, color, height, fit) {
   const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width * dpr; canvas.height = height * dpr;
-  canvas.style.width = rect.width + "px"; canvas.style.height = height + "px";
-  ctx.scale(dpr, dpr);
-  const W = rect.width, H = height, pad = { top: 10, right: 10, bottom: 24, left: 40 };
+  const scroll = canvas.parentElement;
+  const visW = scroll.getBoundingClientRect().width;
+  const pad = { top: 10, right: 10, bottom: 24, left: 8 };
+  const W = fit ? visW : Math.max(visW, (values.length - 1) * PT_SPACING + pad.left + pad.right), H = height;
+  const ctx = sizeCanvas(canvas, W, H, dpr);
   const cW = W - pad.left - pad.right, cH = H - pad.top - pad.bottom;
   const span = Math.max(...values) - Math.min(...values);
   const minV = Math.min(...values) - span * 0.15 - 0.5, maxV = Math.max(...values) + span * 0.15 + 0.5;
   const range = maxV - minV || 1;
   const pts = values.map((v, i) => ({ x: pad.left + (i / (values.length - 1 || 1)) * cW, y: pad.top + cH - ((v - minV) / range) * cH }));
   ctx.strokeStyle = "#e0e0e6"; ctx.lineWidth = 0.5;
-  for (let i = 0; i < 4; i++) { const y = pad.top + (i / 3) * cH; ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke(); }
-  ctx.fillStyle = "#71717a"; ctx.font = "10px -apple-system,sans-serif"; ctx.textAlign = "right";
-  for (let i = 0; i < 4; i++) { const y = pad.top + (i / 3) * cH; const val = maxV - (i / 3) * range; ctx.fillText(val < 10 ? val.toFixed(1) : Math.round(val), pad.left - 6, y + 3); }
-  ctx.textAlign = "center"; const step = Math.max(1, Math.floor(values.length / 5));
-  for (let i = 0; i < values.length; i += step) ctx.fillText(labels[i], pts[i].x, H - 4);
+  for (let i = 0; i < 4; i++) { const y = pad.top + (i / 3) * cH; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.fillStyle = "#71717a"; ctx.font = "10px -apple-system,sans-serif";
+  ctx.textAlign = "center"; const step = Math.max(1, Math.ceil(values.length / Math.max(1, Math.floor(cW / 44))));
+  let lastRight = -Infinity; // clamping to the canvas edge can push a label into its neighbour
+  for (let i = 0; i < values.length; i += step) {
+    const half = ctx.measureText(labels[i]).width / 2;
+    const x = Math.min(Math.max(pts[i].x, half + 1), W - half - 1);
+    if (x - half < lastRight + 8) continue;
+    ctx.fillText(labels[i], x, H - 4);
+    lastRight = x + half;
+  }
   ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
   pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)); ctx.stroke();
   const r = parseInt(color.slice(1, 3), 16), g = parseInt(color.slice(3, 5), 16), b = parseInt(color.slice(5, 7), 16);
@@ -458,7 +516,12 @@ function drawLineChart(canvas, values, labels, color, height) {
   grad.addColorStop(0, `rgba(${r},${g},${b},0.1)`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
   ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(pts[0].x, H - pad.bottom);
   pts.forEach(p => ctx.lineTo(p.x, p.y)); ctx.lineTo(pts[pts.length - 1].x, H - pad.bottom); ctx.fill();
-  pts.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); });
+  if (cW / Math.max(1, values.length - 1) >= 10) pts.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); });
+  // Pinned Y axis — same scale and vertical geometry as the plot above
+  const ax = sizeCanvas(axisCanvas, AXIS_W, H, dpr);
+  ax.fillStyle = "#71717a"; ax.font = "10px -apple-system,sans-serif"; ax.textAlign = "right";
+  for (let i = 0; i < 4; i++) { const y = pad.top + (i / 3) * cH; const val = maxV - (i / 3) * range; ax.fillText(val < 10 ? val.toFixed(1) : Math.round(val), AXIS_W - 6, y + 3); }
+  scroll.scrollLeft = scroll.scrollWidth;
 }
 
 // ─── Components ───
@@ -492,15 +555,13 @@ function renderExerciseCard(ex) {
 }
 
 function renderProgressChart(ex) {
-  const hist = state.history[ex.id] || [];
+  const hist = inRange(state.history[ex.id] || []);
   if (hist.length < 1) return null;
-  const data = hist.slice(-20).map(h => ({ date: fmtDate(h.date), weight: Math.max(...h.sets.map(s => parseFloat(s.weight) || 0)) }));
-  const card = h("div", { className: "progress-card" },
+  const data = hist.map(h => ({ date: fmtDate(h.date), weight: Math.max(...h.sets.map(s => parseFloat(s.weight) || 0)) }));
+  return h("div", { className: "progress-card" },
     h("div", { className: "progress-title" }, ex.name, h("span", { className: "progress-subtitle" }, "Max Weight (kg)")),
-    h("div", { className: "chart-container" }, h("canvas", { id: "chart-" + ex.id }))
+    renderChart(data.map(d => d.weight), data.map(d => d.date), "#2563eb", 120)
   );
-  requestAnimationFrame(() => { const c = document.getElementById("chart-" + ex.id); if (c) drawLineChart(c, data.map(d => d.weight), data.map(d => d.date), "#2563eb", 120); });
-  return card;
 }
 
 // ─── Tab: Weight ───
@@ -509,13 +570,13 @@ function renderWeightTab() {
   const recent = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   const frag = document.createDocumentFragment();
   if (sorted.length >= 1) {
-    const data = sorted.slice(-30);
-    const card = h("div", { className: "progress-card", style: "margin-bottom:12px;" },
-      h("div", { className: "progress-title" }, "Body Weight", h("span", { className: "progress-subtitle" }, "kg")),
-      h("div", { className: "chart-container" }, h("canvas", { id: "chart-bw" }))
-    );
-    frag.append(card);
-    requestAnimationFrame(() => { const c = document.getElementById("chart-bw"); if (c) drawLineChart(c, data.map(d => d.weight), data.map(d => fmtDate(d.date)), "#16a34a", 160); });
+    const data = inRange(sorted);
+    frag.append(renderRangeBar());
+    frag.append(data.length >= 1
+      ? h("div", { className: "progress-card", style: "margin-bottom:12px;" },
+          h("div", { className: "progress-title" }, "Body Weight", h("span", { className: "progress-subtitle" }, "kg")),
+          renderChart(data.map(d => d.weight), data.map(d => fmtDate(d.date)), "#16a34a", 160))
+      : h("div", { className: "empty-state" }, "No weigh-ins in this range."));
   } else {
     frag.append(h("div", { className: "empty-state" }, "Log at least 2 weigh-ins to see the chart."));
   }
@@ -551,9 +612,12 @@ function renderLiftingTab() {
     frag.append(h("button", { className: "btn-save" + (state.saveIndicator ? " saved" : ""), onClick: saveSession }, state.saveIndicator ? "✓ Saved!" : "Save Session"));
   }
   if (state.liftSub === "progress") {
+    const anyHist = prog.exercises.some(ex => (state.history[ex.id] || []).length > 0);
+    if (anyHist) frag.append(renderRangeBar());
     let has = false;
     prog.exercises.forEach(ex => { const c = renderProgressChart(ex); if (c) { frag.append(c); has = true; } });
-    if (!has) frag.append(h("div", { className: "empty-state" }, "Log at least 2 sessions to see progression charts."));
+    if (!has) frag.append(h("div", { className: "empty-state" },
+      anyHist ? "No sessions in this range." : "Log at least 2 sessions to see progression charts."));
   }
   return frag;
 }
@@ -564,22 +628,23 @@ function renderRunningTab() {
   const recent = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   const frag = document.createDocumentFragment();
   if (sorted.length >= 1) {
-    const data = sorted.slice(-30);
-    frag.append(h("div", { className: "progress-card", style: "margin-bottom:8px;" },
-      h("div", { className: "progress-title" }, "Distance", h("span", { className: "progress-subtitle" }, "km")),
-      h("div", { className: "chart-container" }, h("canvas", { id: "chart-run-dist" }))
-    ));
+    const data = inRange(sorted);
+    frag.append(renderRangeBar());
+    if (data.length >= 1) {
+      frag.append(h("div", { className: "progress-card", style: "margin-bottom:8px;" },
+        h("div", { className: "progress-title" }, "Distance", h("span", { className: "progress-subtitle" }, "km")),
+        renderChart(data.map(d => d.distance), data.map(d => fmtDate(d.date)), "#7c3aed", 140)
+      ));
+    } else {
+      frag.append(h("div", { className: "empty-state" }, "No runs in this range."));
+    }
     const paceData = data.filter(d => d.distance > 0 && d.duration > 0);
     if (paceData.length >= 2) {
       frag.append(h("div", { className: "progress-card", style: "margin-bottom:12px;" },
         h("div", { className: "progress-title" }, "Pace", h("span", { className: "progress-subtitle" }, "min/km")),
-        h("div", { className: "chart-container" }, h("canvas", { id: "chart-run-pace" }))
+        renderChart(paceData.map(d => d.duration / d.distance), paceData.map(d => fmtDate(d.date)), "#7c3aed", 140)
       ));
     }
-    requestAnimationFrame(() => {
-      const c1 = document.getElementById("chart-run-dist"); if (c1) drawLineChart(c1, data.map(d => d.distance), data.map(d => fmtDate(d.date)), "#7c3aed", 140);
-      if (paceData.length >= 2) { const c2 = document.getElementById("chart-run-pace"); if (c2) drawLineChart(c2, paceData.map(d => d.duration / d.distance), paceData.map(d => fmtDate(d.date)), "#7c3aed", 140); }
-    });
   } else {
     frag.append(h("div", { className: "empty-state" }, "Log at least 2 runs to see charts."));
   }

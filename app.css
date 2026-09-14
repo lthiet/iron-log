@@ -70,10 +70,7 @@ button:active { transform: scale(0.97); }
 .progress-subtitle { color: var(--text-muted); font-weight: 400; margin-left: 8px; font-size: 11px; }
 .chart-wrap { position: relative; width: 100%; }
 .chart-axis { position: absolute; left: 0; top: 0; }
-.chart-scroll { margin-left: 40px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-.chart-scroll::-webkit-scrollbar { height: 4px; }
-.chart-scroll::-webkit-scrollbar-thumb { background: var(--border); }
-.chart-scroll::-webkit-scrollbar-track { background: transparent; }
+.chart-scroll { margin-left: 40px; overflow: hidden; }
 .empty-state { text-align: center; padding: 48px 0; color: var(--text-muted); font-size: 14px; }
 
 .editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }

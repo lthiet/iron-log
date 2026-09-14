@@ -472,7 +472,7 @@ function h(tag, attrs, ...ch) {
 }
 
 // ─── Charts ───
-const AXIS_W = 40, PT_SPACING = 48;
+const AXIS_W = 40;
 
 // Exponential moving average weighted by real elapsed days, so the trend keeps the same
 // meaning whether weigh-ins are daily or sporadic. A long gap gives alpha ~1, letting the
@@ -492,11 +492,10 @@ function renderChart(values, labels, color, height, trend) {
   const plot = h("canvas", { className: "chart-plot" });
   const axis = h("canvas", { className: "chart-axis" });
   const scroll = h("div", { className: "chart-scroll" }, plot);
-  const fit = state.chartRange === "all"; // "All" compresses the full history into view
   // The container measures 0 until layout settles (or while the tab is hidden); retry until it has a width.
   const draw = (tries = 120) => requestAnimationFrame(() => {
     if (!scroll.isConnected) return;
-    if (scroll.getBoundingClientRect().width > 0) drawLineChart(plot, axis, values, labels, color, height, fit, trend);
+    if (scroll.getBoundingClientRect().width > 0) drawLineChart(plot, axis, values, labels, color, height, trend);
     else if (tries > 0) draw(tries - 1);
   });
   draw();
@@ -511,12 +510,11 @@ function sizeCanvas(canvas, w, h, dpr) {
   return ctx;
 }
 
-function drawLineChart(canvas, axisCanvas, values, labels, color, height, fit, trend) {
+function drawLineChart(canvas, axisCanvas, values, labels, color, height, trend) {
   const dpr = window.devicePixelRatio || 1;
-  const scroll = canvas.parentElement;
-  const visW = scroll.getBoundingClientRect().width;
   const pad = { top: 10, right: 10, bottom: 24, left: 8 };
-  const W = fit ? visW : Math.max(visW, (values.length - 1) * PT_SPACING + pad.left + pad.right), H = height;
+  // Every range compresses its data into the visible width — no horizontal scrolling.
+  const W = canvas.parentElement.getBoundingClientRect().width, H = height;
   const ctx = sizeCanvas(canvas, W, H, dpr);
   const cW = W - pad.left - pad.right, cH = H - pad.top - pad.bottom;
   const span = Math.max(...values) - Math.min(...values);
@@ -552,7 +550,6 @@ function drawLineChart(canvas, axisCanvas, values, labels, color, height, fit, t
   const ax = sizeCanvas(axisCanvas, AXIS_W, H, dpr);
   ax.fillStyle = "#71717a"; ax.font = "10px -apple-system,sans-serif"; ax.textAlign = "right";
   for (let i = 0; i < 4; i++) { const y = pad.top + (i / 3) * cH; const val = maxV - (i / 3) * range; ax.fillText(val < 10 ? val.toFixed(1) : Math.round(val), AXIS_W - 6, y + 3); }
-  scroll.scrollLeft = scroll.scrollWidth;
 }
 
 // ─── Components ───

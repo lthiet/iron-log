@@ -176,9 +176,20 @@ state.desktop = DESKTOP_Q.matches;
 state.wide = WIDE_Q.matches;
 DESKTOP_Q.addEventListener("change", (e) => { state.desktop = e.matches; render(); });
 WIDE_Q.addEventListener("change", (e) => { state.wide = e.matches; render(); });
-// Charts are canvas-drawn at a measured width, so a resize needs a redraw.
+// Charts are canvas-drawn at a measured width, so a width change needs a redraw.
+// Only the width matters: on Android the soft keyboard shrinks the viewport
+// height, which fires "resize" too, and a full re-render there would destroy
+// the focused input and dismiss the keyboard before anything can be typed.
 let resizeTimer;
-window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 150); });
+let lastWidth = window.innerWidth;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    render();
+  }, 150);
+});
 
 // ─── Helpers ───
 function todayStr() { return new Date().toISOString().split("T")[0]; }

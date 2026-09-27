@@ -22,7 +22,7 @@
       <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
     </linearGradient>
     <filter id="glow" x="-30%" y="-150%" width="160%" height="400%">
-      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
       <feMerge>
         <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
@@ -44,28 +44,28 @@
     <rect width="128" height="128" fill="url(#vignette)"/>
 
     <!-- Left outer plate -->
-    <rect x="13" y="36" width="17" height="56" rx="4" fill="url(#plate-v)"/>
+    <rect x="13" y="36" width="17" height="56" fill="url(#plate-v)"/>
     <!-- Left plate highlight strip -->
-    <rect x="15" y="38" width="6" height="26" rx="2.5" fill="rgba(255,255,255,0.42)"/>
+    <rect x="15" y="38" width="6" height="26" fill="rgba(255,255,255,0.42)"/>
 
     <!-- Left collar -->
-    <rect x="30" y="46" width="11" height="36" rx="2.5" fill="url(#collar-v)"/>
+    <rect x="30" y="46" width="11" height="36" fill="url(#collar-v)"/>
     <!-- Left collar highlight -->
-    <rect x="31" y="47" width="4" height="16" rx="1.5" fill="rgba(255,255,255,0.18)"/>
+    <rect x="31" y="47" width="4" height="16" fill="rgba(255,255,255,0.18)"/>
 
     <!-- Bar (with blue glow) -->
-    <rect x="41" y="59" width="46" height="10" rx="3" fill="url(#bar-v)" filter="url(#glow)"/>
+    <rect x="41" y="59" width="46" height="10" fill="url(#bar-v)" filter="url(#glow)"/>
     <!-- Bar top shine -->
-    <rect x="42" y="60" width="44" height="4" rx="2" fill="url(#shine)"/>
+    <rect x="42" y="60" width="44" height="4" fill="url(#shine)"/>
 
     <!-- Right collar -->
-    <rect x="87" y="46" width="11" height="36" rx="2.5" fill="url(#collar-v)"/>
+    <rect x="87" y="46" width="11" height="36" fill="url(#collar-v)"/>
     <!-- Right collar highlight -->
-    <rect x="88" y="47" width="4" height="16" rx="1.5" fill="rgba(255,255,255,0.18)"/>
+    <rect x="88" y="47" width="4" height="16" fill="rgba(255,255,255,0.18)"/>
 
     <!-- Right outer plate -->
-    <rect x="98" y="36" width="17" height="56" rx="4" fill="url(#plate-v)"/>
+    <rect x="98" y="36" width="17" height="56" fill="url(#plate-v)"/>
     <!-- Right plate highlight strip -->
-    <rect x="100" y="38" width="6" height="26" rx="2.5" fill="rgba(255,255,255,0.42)"/>
+    <rect x="100" y="38" width="6" height="26" fill="rgba(255,255,255,0.42)"/>
   </g>
 </svg>

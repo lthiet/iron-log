@@ -13,12 +13,11 @@ A single-page workout/bodyweight tracker PWA. No build step, no dependencies:
 There are two, split at a 1000px breakpoint, and a change to one often affects the other:
 
 - **Desktop (≥1000px)** — no tab bar. All sections visible at once as columns
-  (`.dash`): Lifting | Progress | Body Weight | Running at ≥1400px, collapsing to
-  three columns below that. One shared range picker lives in the header.
-- **Mobile (<1000px)** — tab bar (Weight / Lifting / Running), one section at a time,
+  (`.dash`): Lifting | Progress | Body Weight. One shared range picker lives in the header.
+- **Mobile (<1000px)** — tab bar (Weight / Lifting), one section at a time,
   with Log/Progress sub-tabs inside Lifting. Each section renders its own range picker.
 
-`state.desktop` / `state.wide` track the breakpoints and re-render on change.
+`state.desktop` tracks the breakpoint and re-renders on change.
 
 No rounded corners anywhere — this is deliberate. Don't reintroduce `border-radius`.
 
@@ -37,7 +36,7 @@ confirm the change looks right in each. Stop the server afterwards.
 
 Charts only draw when the page has data and the Browser pane is visible. To see them,
 seed data in memory rather than writing to IndexedDB: assign to `state.bodyWeight` /
-`state.runs` / `state.history` via `javascript_tool`, then call `render()`.
+`state.history` via `javascript_tool`, then call `render()`.
 
 A `PostToolUse` hook in `.claude/settings.json` posts this reminder automatically when
 a UI file is edited.

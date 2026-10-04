@@ -1,4 +1,4 @@
-console.log("app.js v7 loaded");
+console.log("app.js v8 loaded");
 // ─── Storage ───
 const DB_NAME = "ironlog", STORE_NAME = "data";
 
@@ -32,6 +32,17 @@ async function dbSet(k, v) {
       tx.oncomplete = () => res();
     });
   } catch (e) { console.error("Save failed:", e); }
+}
+
+async function dbDel(k) {
+  try {
+    const db = await openDB();
+    return new Promise(res => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).delete(k);
+      tx.oncomplete = () => res();
+    });
+  } catch (e) { console.error("Delete failed:", e); }
 }
 
 // ─── Cloud Sync ───
@@ -75,26 +86,26 @@ async function syncFromCloud() {
   const cloud = snap.val() || {};
 
   if (cloud.programs) {
-    state.programs = cloud.programs;
+    state.programs = migratePrograms(cloud.programs);
+    if (state.programs !== cloud.programs) await cloudSet("programs", state.programs);
   } else {
     await cloudSet("programs", state.programs);
   }
 
   state.bodyWeight = mergeArraysByDate(state.bodyWeight, cloud.bodyweight || []);
-  state.runs = mergeArraysByDate(state.runs, cloud.runs || []);
   state.history = mergeHistory(state.history, cloud.history || {});
 
   // Push merged data back
   await Promise.all([
     dbSet("programs", state.programs),
     dbSet("bodyweight", state.bodyWeight),
-    dbSet("runs", state.runs),
     dbSet("history", state.history),
     cloudSet("bodyweight", state.bodyWeight),
-    cloudSet("runs", state.runs),
     cloudSet("history", state.history),
+    db.ref("users/" + state.user.uid + "/runs").remove(), // running was dropped; clear old data
   ]);
 
+  pickTodaysProgram();
   initSession();
   render();
 }
@@ -105,9 +116,8 @@ function attachCloudListeners() {
   const uid = state.user.uid;
   const keys = [
     { fbKey: "bodyweight", stateKey: "bodyWeight", merge: (_, c) => c || [] },
-    { fbKey: "runs", stateKey: "runs", merge: (_, c) => c || [] },
     { fbKey: "history", stateKey: "history", merge: (_, c) => c || {} },
-    { fbKey: "programs", stateKey: "programs", merge: (_, c) => c || state.programs },
+    { fbKey: "programs", stateKey: "programs", merge: (_, c) => c ? migratePrograms(c) : state.programs },
   ];
   keys.forEach(({ fbKey, stateKey, merge }) => {
     const ref = db.ref("users/" + uid + "/" + fbKey);
@@ -152,17 +162,32 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 // ─── Defaults ───
+// Exercise ids are what history is keyed on: bench / pullup / deadlift / ohp are kept
+// from the old Push/Pull/Legs defaults so their logged sessions carry over.
 const DEFAULT_PROGRAMS = [
-  { id: "push", name: "Push", exercises: [{ id: "bench", name: "Bench Press" }, { id: "ohp", name: "Overhead Press" }, { id: "incline-db", name: "Incline DB Press" }, { id: "lateral-raise", name: "Lateral Raises" }, { id: "tricep-push", name: "Tricep Pushdowns" }] },
-  { id: "pull", name: "Pull", exercises: [{ id: "deadlift", name: "Deadlift" }, { id: "pullup", name: "Pull-ups" }, { id: "barbell-row", name: "Barbell Row" }, { id: "face-pull", name: "Face Pulls" }, { id: "bicep-curl", name: "Bicep Curls" }] },
-  { id: "legs", name: "Legs", exercises: [{ id: "squat", name: "Squat" }, { id: "rdl", name: "Romanian Deadlift" }, { id: "leg-press", name: "Leg Press" }, { id: "leg-curl", name: "Leg Curls" }, { id: "calf-raise", name: "Calf Raises" }] }
+  { id: "tue", name: "Tuesday", exercises: [{ id: "front-squat", name: "Front Squat" }, { id: "bench", name: "Bench Press" }, { id: "pullup", name: "Pull-ups" }] },
+  { id: "thu", name: "Thursday", exercises: [{ id: "deadlift", name: "Deadlift" }, { id: "ohp", name: "Army Press" }, { id: "db-row", name: "One-arm DB Row" }] }
 ];
+
+// Saved programs that are still the untouched old Push/Pull/Legs defaults get the
+// current split; anything the user has edited is left alone.
+function migratePrograms(programs) {
+  const ids = (programs || []).map(p => p.id).join(",");
+  return ids === "push,pull,legs" ? JSON.parse(JSON.stringify(DEFAULT_PROGRAMS)) : programs;
+}
+
+// Open on the split day named after today (e.g. "Tuesday"), if there is one.
+function pickTodaysProgram() {
+  const today = new Date().toLocaleDateString("en-GB", { weekday: "long" }).toLowerCase();
+  const i = state.programs.findIndex(p => (p.name || "").trim().toLowerCase() === today);
+  if (i >= 0) state.activeProgram = i;
+}
 
 // ─── State ───
 let state = {
   view: "weight", liftSub: "log",
   programs: DEFAULT_PROGRAMS, activeProgram: 0,
-  sessionSets: {}, history: {}, bodyWeight: [], runs: [],
+  sessionSets: {}, history: {}, bodyWeight: [],
   loaded: false, saveIndicator: false, user: null,
   rawDataOpen: false, rawDataEdit: null, rawDataTab: "weight", rawDataHistoryEx: null,
   chartRange: (() => { try { return localStorage.getItem("chartRange") || "all"; } catch { return "all"; } })()
@@ -171,11 +196,8 @@ let state = {
 // ─── Layout breakpoint ───
 // Desktop drops the tab nav for an all-at-once dashboard; phones keep the tabs.
 const DESKTOP_Q = window.matchMedia("(min-width: 1000px)");
-const WIDE_Q = window.matchMedia("(min-width: 1400px)"); // room for a fourth column
 state.desktop = DESKTOP_Q.matches;
-state.wide = WIDE_Q.matches;
 DESKTOP_Q.addEventListener("change", (e) => { state.desktop = e.matches; render(); });
-WIDE_Q.addEventListener("change", (e) => { state.wide = e.matches; render(); });
 // Charts are canvas-drawn at a measured width, so a width change needs a redraw.
 // Only the width matters: on Android the soft keyboard shrinks the viewport
 // height, which fires "resize" too, and a full re-render there would destroy
@@ -243,11 +265,14 @@ function clearSession() {
 
 // ─── Data Actions ───
 async function loadAll() {
-  state.programs = await dbGet("programs", DEFAULT_PROGRAMS);
+  const saved = await dbGet("programs", DEFAULT_PROGRAMS);
+  state.programs = migratePrograms(saved);
+  if (state.programs !== saved) dbSet("programs", state.programs);
   state.history = await dbGet("history", {});
   state.bodyWeight = await dbGet("bodyweight", []);
-  state.runs = await dbGet("runs", []);
+  dbDel("runs"); // running was dropped; clear old data
   state.loaded = true;
+  pickTodaysProgram();
   initSession();
   render();
 }
@@ -260,17 +285,6 @@ async function logBodyWeight(w) {
   state.bodyWeight.sort((a, b) => a.date.localeCompare(b.date));
   await dbSet("bodyweight", state.bodyWeight);
   cloudSet("bodyweight", state.bodyWeight);
-  render();
-}
-
-async function logRun(distance, duration) {
-  const date = todayStr();
-  const idx = state.runs.findIndex(e => e.date === date);
-  const entry = { date, distance: parseFloat(distance) || 0, duration: parseInt(duration) || 0 };
-  if (idx >= 0) state.runs[idx] = entry; else state.runs.push(entry);
-  state.runs.sort((a, b) => a.date.localeCompare(b.date));
-  await dbSet("runs", state.runs);
-  cloudSet("runs", state.runs);
   render();
 }
 
@@ -314,7 +328,6 @@ function openRawData() {
   });
   state.rawDataEdit = {
     bodyWeight: JSON.parse(JSON.stringify(state.bodyWeight)),
-    runs: JSON.parse(JSON.stringify(state.runs)),
     histText,
   };
   state.rawDataTab = "weight";
@@ -337,16 +350,13 @@ async function saveRawData() {
     history[exId] = ed.histText[exId].map(s => ({ date: s.date, sets: textToSets(s.setsText) }));
   });
   state.bodyWeight = ed.bodyWeight;
-  state.runs = ed.runs;
   state.history = history;
   await Promise.all([
     dbSet("bodyweight", state.bodyWeight),
-    dbSet("runs", state.runs),
     dbSet("history", state.history),
   ]);
   if (state.user) {
     cloudSet("bodyweight", state.bodyWeight);
-    cloudSet("runs", state.runs);
     cloudSet("history", state.history);
   }
   state.rawDataOpen = false;
@@ -375,24 +385,6 @@ function renderRawDataModal() {
         )
       ),
       h("button", { className: "btn-dashed", style: "margin-top:8px;", onClick: () => { rows.push({ date: todayStr(), weight: 0 }); render(); } }, "+ Add row")
-    );
-  }
-
-  function runsTable() {
-    const rows = ed.runs;
-    return h("div", { className: "tbl-wrap" },
-      h("table", { className: "data-table" },
-        h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "Distance (km)"), h("th", {}, "Duration (min)"), h("th", {}))),
-        h("tbody", {},
-          ...rows.map((row, i) => h("tr", {},
-            h("td", {}, h("input", { type: "date", className: "td-input", value: row.date, onInput: e => { rows[i].date = e.target.value; } })),
-            h("td", {}, h("input", { type: "number", inputMode: "decimal", className: "td-input", value: String(row.distance), onInput: e => { rows[i].distance = parseFloat(e.target.value) || 0; } })),
-            h("td", {}, h("input", { type: "number", inputMode: "numeric", className: "td-input", value: String(row.duration), onInput: e => { rows[i].duration = parseInt(e.target.value) || 0; } })),
-            h("td", {}, h("button", { className: "btn-remove tbl-del", onClick: () => { rows.splice(i, 1); render(); } }, "×"))
-          ))
-        )
-      ),
-      h("button", { className: "btn-dashed", style: "margin-top:8px;", onClick: () => { rows.push({ date: todayStr(), distance: 0, duration: 0 }); render(); } }, "+ Add row")
     );
   }
 
@@ -425,7 +417,7 @@ function renderRawDataModal() {
     );
   }
 
-  const tabs = [{ key: "weight", label: "Weight" }, { key: "exercise", label: "Exercise" }, { key: "running", label: "Running" }];
+  const tabs = [{ key: "weight", label: "Weight" }, { key: "exercise", label: "Exercise" }];
   return h("div", { className: "modal-overlay", onClick: e => { if (e.target.className === "modal-overlay") closeRawData(); } },
     h("div", { className: "modal" },
       h("div", { className: "modal-header" },
@@ -439,9 +431,7 @@ function renderRawDataModal() {
         }, t.label))
       ),
       h("div", { className: "modal-body" },
-        state.rawDataTab === "weight" ? bwTable() :
-        state.rawDataTab === "exercise" ? histTable() :
-        runsTable()
+        state.rawDataTab === "weight" ? bwTable() : histTable()
       ),
       h("div", { className: "modal-footer" },
         h("button", { className: "btn-cancel", onClick: closeRawData }, "Cancel"),
@@ -452,6 +442,11 @@ function renderRawDataModal() {
 }
 
 async function savePrograms(ed) {
+  // Blank rows left over from "+ Add" are dropped rather than saved as nameless entries.
+  ed = ed
+    .map(p => ({ ...p, name: p.name.trim(), exercises: p.exercises.filter(ex => ex.name.trim()) }))
+    .filter(p => p.name);
+  if (!ed.length) return;
   state.programs = ed;
   state.activeProgram = 0;
   state.view = "lifting";
@@ -639,7 +634,8 @@ function renderWeightTab(showRange = true) {
 // ─── Tab: Lifting ───
 function renderProgramBar() {
   return h("div", { className: "program-bar" },
-    ...state.programs.map((p, i) => h("button", { className: "prog-btn" + (i === state.activeProgram ? " active" : ""), onClick: () => { state.activeProgram = i; initSession(); render(); } }, p.name))
+    ...state.programs.map((p, i) => h("button", { className: "prog-btn" + (i === state.activeProgram ? " active" : ""), onClick: () => { state.activeProgram = i; initSession(); render(); } }, p.name)),
+    h("button", { className: "prog-btn prog-edit", onClick: () => { state.view = "edit"; render(); } }, "Edit")
   );
 }
 
@@ -676,77 +672,42 @@ function renderLiftingTab() {
   return frag;
 }
 
-// ─── Tab: Running ───
-function renderRunningTab(showRange = true) {
-  const sorted = [...state.runs].sort((a, b) => a.date.localeCompare(b.date));
-  const recent = sorted.length > 0 ? sorted[sorted.length - 1] : null;
-  const frag = document.createDocumentFragment();
-  if (sorted.length >= 1) {
-    const data = inRange(sorted);
-    if (showRange) frag.append(renderRangeBar());
-    if (data.length >= 1) {
-      frag.append(h("div", { className: "progress-card", style: "margin-bottom:8px;" },
-        h("div", { className: "progress-title" }, "Distance", h("span", { className: "progress-subtitle" }, "km")),
-        renderChart(data.map(d => d.distance), data.map(d => fmtDate(d.date)), "#7c3aed", 140)
-      ));
-    } else {
-      frag.append(h("div", { className: "empty-state" }, "No runs in this range."));
-    }
-    const paceData = data.filter(d => d.distance > 0 && d.duration > 0);
-    if (paceData.length >= 2) {
-      frag.append(h("div", { className: "progress-card", style: "margin-bottom:12px;" },
-        h("div", { className: "progress-title" }, "Pace", h("span", { className: "progress-subtitle" }, "min/km")),
-        renderChart(paceData.map(d => d.duration / d.distance), paceData.map(d => fmtDate(d.date)), "#7c3aed", 140)
-      ));
-    }
-  } else {
-    frag.append(h("div", { className: "empty-state" }, "Log at least 2 runs to see charts."));
-  }
-  let distEl, durEl;
-  frag.append(h("div", { className: "card" },
-    h("div", { className: "card-header" }, h("h3", {}, "Log Run"), recent ? h("span", { className: "last" }, `Last: ${recent.distance}km in ${recent.duration}min`) : null),
-    h("div", { style: "display:flex;flex-direction:column;gap:8px;" },
-      h("div", { style: "display:flex;gap:8px;" },
-        h("div", { className: "input-wrap" }, distEl = h("input", { type: "number", inputMode: "decimal", className: "input-field", placeholder: "distance", style: "padding-right:34px;" }), h("span", { className: "input-unit" }, "km")),
-        h("div", { className: "input-wrap" }, durEl = h("input", { type: "number", inputMode: "numeric", className: "input-field", placeholder: "duration", style: "padding-right:34px;" }), h("span", { className: "input-unit" }, "min"))
-      ),
-      h("button", { className: "btn-log btn-log-run", style: "width:100%;padding:12px;", onClick: () => { if (distEl.value || durEl.value) { logRun(distEl.value, durEl.value); distEl.value = ""; durEl.value = ""; } } }, "Log Run")
-    ),
-    sorted.length > 0 ? h("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;" },
-      ...sorted.slice(-10).reverse().map(e => h("div", { className: "tag" }, `${fmtDate(e.date)}: ${e.distance}km ${e.duration}min`,
-        h("button", { className: "tag-remove", onClick: () => { state.runs = state.runs.filter(x => x.date !== e.date); dbSet("runs", state.runs); cloudSet("runs", state.runs); render(); } }, "×")
-      ))
-    ) : null
-  ));
-  return frag;
-}
-
 // ─── Editor ───
 function renderEditor() {
   let ed = JSON.parse(JSON.stringify(state.programs));
   function rr() { const c = document.getElementById("editor-container"); if (c) { c.innerHTML = ""; c.append(buildEd()); } }
+  // Adds a blank exercise to a day and puts the cursor in it, so a day can be typed out
+  // as name, Enter, name, Enter…
+  function addExercise(pIdx) {
+    ed[pIdx].exercises.push({ id: "ex-" + Date.now(), name: "" });
+    rr();
+    const inputs = document.querySelectorAll(`#editor-container [data-day="${pIdx}"] .ex-input`);
+    if (inputs.length) inputs[inputs.length - 1].focus();
+  }
   function buildEd() {
     const frag = document.createDocumentFragment();
     ed.forEach((prog, pIdx) => {
-      frag.append(h("div", { className: "card", style: { marginBottom: "12px" } },
+      frag.append(h("div", { className: "card", "data-day": String(pIdx), style: { marginBottom: "12px" } },
         h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" } },
-          h("input", { className: "edit-input title", value: prog.name, onInput: (e) => { ed[pIdx].name = e.target.value; } }),
-          h("button", { className: "btn-remove danger", onClick: () => { if (ed.length <= 1) return; ed.splice(pIdx, 1); rr(); } }, "×")
+          h("input", { className: "edit-input title", value: prog.name, placeholder: "Day name", onInput: (e) => { ed[pIdx].name = e.target.value; } }),
+          h("button", { className: "btn-remove danger", title: "Remove day", onClick: () => { if (ed.length <= 1) return; ed.splice(pIdx, 1); rr(); } }, "×")
         ),
         ...prog.exercises.map((ex, eIdx) => h("div", { className: "edit-row" },
           h("span", { className: "edit-num" }, String(eIdx + 1)),
-          h("input", { className: "edit-input", value: ex.name, placeholder: "Exercise name", style: { fontSize: "13px", padding: "7px 12px" }, onInput: (e) => { ed[pIdx].exercises[eIdx].name = e.target.value; } }),
-          h("button", { className: "btn-remove", onClick: () => { ed[pIdx].exercises.splice(eIdx, 1); rr(); } }, "×")
+          h("input", { className: "edit-input ex-input", value: ex.name, placeholder: "Exercise name", style: { fontSize: "13px", padding: "7px 12px" },
+            onInput: (e) => { ed[pIdx].exercises[eIdx].name = e.target.value; },
+            onKeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); addExercise(pIdx); } } }),
+          h("button", { className: "btn-remove", title: "Remove exercise", onClick: () => { ed[pIdx].exercises.splice(eIdx, 1); rr(); } }, "×")
         )),
-        h("button", { className: "btn-dashed", onClick: () => { ed[pIdx].exercises.push({ id: "ex-" + Date.now(), name: "" }); rr(); } }, "+ Add Exercise")
+        h("button", { className: "btn-dashed", onClick: () => addExercise(pIdx) }, "+ Add Exercise")
       ));
     });
-    frag.append(h("button", { className: "btn-dashed-lg", onClick: () => { ed.push({ id: "prog-" + Date.now(), name: "New", exercises: [{ id: "ex-" + Date.now(), name: "" }] }); rr(); } }, "+ Add Program"));
+    frag.append(h("button", { className: "btn-dashed-lg", onClick: () => { ed.push({ id: "prog-" + Date.now(), name: "", exercises: [] }); addExercise(ed.length - 1); } }, "+ Add Day"));
     return frag;
   }
   return h("div", {},
     h("div", { className: "editor-header" },
-      h("h2", {}, "Edit Programs"),
+      h("h2", {}, "Edit Splits"),
       h("div", { style: { display: "flex", gap: "8px" } },
         h("button", { className: "btn-cancel", onClick: openRawData }, "{ } Raw Data"),
         h("button", { className: "btn-cancel", onClick: () => { state.view = "lifting"; render(); } }, "Cancel"),
@@ -808,22 +769,15 @@ function render() {
     const lifting = sec("Lifting", renderProgramBar(), renderLiftingLog());
     const progress = sec("Progress", renderLiftingProgress(false));
     const weight = sec("Body Weight", renderWeightTab(false));
-    const running = sec("Running", renderRunningTab(false));
-    // Columns are grouped explicitly: letting the grid wrap would strand a short
-    // section on a second row below the very tall lifting column.
-    const cols = state.wide
-      ? [col(lifting), col(progress), col(weight), col(running)]
-      : [col(lifting), col(progress), col(weight, running)];
-    root.append(h("div", { className: "dash" }, ...cols));
+    root.append(h("div", { className: "dash" }, col(lifting), col(progress), col(weight)));
     if (state.rawDataOpen) root.append(renderRawDataModal());
     return;
   }
   root.append(h("div", { className: "tabs", style: "margin-bottom:16px;" },
-    ...["weight", "lifting", "running"].map(v => h("button", { className: "tab" + (state.view === v ? " active" : ""), onClick: () => { state.view = v; render(); } }, v.charAt(0).toUpperCase() + v.slice(1)))
+    ...["weight", "lifting"].map(v => h("button", { className: "tab" + (state.view === v ? " active" : ""), onClick: () => { state.view = v; render(); } }, v.charAt(0).toUpperCase() + v.slice(1)))
   ));
   if (state.view === "weight") root.append(renderWeightTab());
   if (state.view === "lifting") root.append(renderLiftingTab());
-  if (state.view === "running") root.append(renderRunningTab());
   if (state.rawDataOpen) root.append(renderRawDataModal());
 }
 

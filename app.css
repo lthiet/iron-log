@@ -5,7 +5,6 @@
   --accent: #2563eb; --accent-glow: rgba(37,99,235,0.08);
   --success: #16a34a; --success-glow: rgba(22,163,74,0.08);
   --warning: #d97706; --danger: #dc2626; --danger-glow: rgba(220,38,38,0.08);
-  --run: #7c3aed; --run-glow: rgba(124,58,237,0.08);
 }
 html, body {
   height: 100%; background: var(--bg); color: var(--text);
@@ -38,6 +37,7 @@ button:active { transform: scale(0.97); }
 .program-bar::-webkit-scrollbar { display: none; }
 .prog-btn { background: transparent; border: 1px solid var(--border); padding: 8px 18px; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; white-space: nowrap; transition: all 0.15s; }
 .prog-btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
+.prog-edit { border-style: dashed; font-weight: 500; margin-left: auto; }
 
 .range-bar { display: flex; gap: 6px; margin-bottom: 8px; }
 .range-btn { flex: 1; background: transparent; border: 1px solid var(--border); padding: 6px 0; font-size: 12px; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
@@ -88,11 +88,8 @@ button:active { transform: scale(0.97); }
 
 .input-row { display: flex; gap: 8px; align-items: center; }
 .input-field { width: 100%; background: var(--bg); border: 1px solid var(--border); padding: 10px 12px; font-size: 15px; color: var(--text); font-family: 'SF Mono', 'JetBrains Mono', monospace; box-sizing: border-box; }
-.input-wrap { flex: 1; position: relative; min-width: 0; }
-.input-unit { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--text-muted); font-weight: 500; pointer-events: none; }
 .btn-log {padding: 10px 18px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid; }
 .btn-log-weight { background: var(--success-glow); border-color: var(--success); color: var(--success); }
-.btn-log-run { background: var(--run-glow); border-color: var(--run); color: var(--run); }
 
 .tag { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', monospace; background: var(--bg); border: 1px solid var(--border); padding: 3px 4px 3px 8px; }
 .tag-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 0 2px; line-height: 1; }
